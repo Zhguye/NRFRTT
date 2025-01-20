@@ -1,104 +1,99 @@
-/*
- * Copyright (c) 2021 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */
-
 #include <stdio.h>
 #include <zephyr/kernel.h>
-#include <string.h>
+#include <zephyr/logging/log.h>
 #include <modem/sms.h>
-#include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
+#include "connect_example.h"
+#include <modem/modem_info.h>
+#include <modem/nrf_modem_lib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <nrf_modem_at.h> 
+#include <zephyr/sys/printk.h>
 
 
-static void sms_callback(struct sms_data *const data, void *context)
-{
-	if (data == NULL) {
-		printk("%s with NULL data\n", __func__);
-		return;
+
+
+LOG_MODULE_REGISTER(at_rtt_modem, LOG_LEVEL_INF);
+
+
+/* Initialize modem */
+static void modem_init(void) {
+    int32_t retval = 0;
+
+    struct modem_param_info modem_info;
+
+
+	
+	
+	
+  	modem_info_init();
+    
+
+    /* Get modem information */
+    modem_info_params_init(&modem_info);
+    LOG_INF("Initializing LTE modem...");
+
+
+    retval = nrf_modem_lib_init();
+	if(retval != 0){
+		LOG_ERR("Failed to initialize nrf modem lib (%d)",retval);
+		k_msleep(5000);
+		
 	}
 
-	if (data->type == SMS_TYPE_DELIVER) {
-		/* When SMS message is received, print information */
-		struct sms_deliver_header *header = &data->header.deliver;
-
-		printk("\nSMS received:\n");
-		printk("\tTime:   %02d-%02d-%02d %02d:%02d:%02d\n",
-			header->time.year,
-			header->time.month,
-			header->time.day,
-			header->time.hour,
-			header->time.minute,
-			header->time.second);
-
-		printk("\tText:   '%s'\n", data->payload);
-		printk("\tLength: %d\n", data->payload_len);
-
-		if (header->app_port.present) {
-			printk("\tApplication port addressing scheme: dest_port=%d, src_port=%d\n",
-				header->app_port.dest_port,
-				header->app_port.src_port);
-		}
-		if (header->concatenated.present) {
-			printk("\tConcatenated short message: ref_number=%d, msg %d/%d\n",
-				header->concatenated.ref_number,
-				header->concatenated.seq_number,
-				header->concatenated.total_msgs);
-		}
-	} else if (data->type == SMS_TYPE_STATUS_REPORT) {
-		printk("SMS status report received\n");
-	} else {
-		printk("SMS protocol message with unknown type received\n");
-	}
+    LOG_INF("Modem initialized");
 }
 
-int main(void)
-{
-	int handle = 0;
-	int ret = 0;
 
-	printk("\nSMS sample starting\n");
+int main(void) {
+    char resp[256];
+    int32_t retval;
 
-	ret = nrf_modem_lib_init();
-	if (ret) {
-		printk("Modem library initialization failed, error: %d\n", ret);
-		return 0;
+    LOG_INF("AT Command over RTT Interface Example");
+
+
+    modem_init();
+
+
+      //  TRACE_START();
+      SEGGER_SYSVIEW_Start();
+    /* Send some example AT commands */
+    
+    retval = nrf_modem_at_scanf("AT+CFUN?","%s",resp);
+    if(retval == 1){
+        LOG_INF("Query modem functionality: %s",resp);
+    }
+
+    retval = nrf_modem_at_scanf("AT+CGMI","%s",resp);
+    if(retval == 1){
+        LOG_INF(" Manufacturer identification: %s",resp);
+    }
+
+    retval = nrf_modem_at_scanf("AT+CGSN","%s",resp);
+    if(retval == 1){
+        LOG_INF("Request product serial number: %s",resp);
+    }
+
+    retval = nrf_modem_at_scanf("AT+CIMI","%s",resp);
+    if(retval == 1){
+        LOG_INF("Request IMSI: %s",resp);
+    }
+
+    retval = nrf_modem_at_scanf("AT+CREG?","%s",resp);
+    if(retval == 1){
+        LOG_INF("Network Registration Status: %s",resp);
+    }
+         // TRACE_STOP();
+         SEGGER_SYSVIEW_Stop();
+    //Register to cereg notifications
+    retval = nrf_modem_at_printf("AT+CEREG=%d",CEREG_NOTIFICATION_LEVEL);
+	if (retval) {
+		LOG_INF("AT+CEREG failed");
+		return -1;
 	}
 
-	ret = lte_lc_connect();
-	if (ret) {
-		printk("Lte_lc failed to initialize and connect, err %d", ret);
-		return 0;
-	}
 
-	handle = sms_register_listener(sms_callback, NULL);
-	if (handle) {
-		printk("sms_register_listener returned err: %d\n", handle);
-		return 0;
-	}
-
-	printk("SMS sample is ready for receiving messages\n");
-
-	/* Sending is done to the phone number specified in the configuration,
-	 * or if it's left empty, an information text is printed.
-	 */
-	if (strcmp(CONFIG_SMS_SEND_PHONE_NUMBER, "")) {
-		printk("Sending SMS: number=%s, text=\"SMS sample: testing\"\n",
-			CONFIG_SMS_SEND_PHONE_NUMBER);
-		ret = sms_send_text(CONFIG_SMS_SEND_PHONE_NUMBER, "SMS sample: testing");
-		if (ret) {
-			printk("Sending SMS failed with error: %d\n", ret);
-		}
-	} else {
-		printk("\nSMS sending is skipped but receiving will still work.\n"
-			"If you wish to send SMS, please configure CONFIG_SMS_SEND_PHONE_NUMBER\n");
-	}
-
-	/* In our application, we should unregister SMS in some conditions with:
-	 *   sms_unregister_listener(handle);
-	 * However, this sample will continue to be registered for
-	 * received SMS messages and they can be seen in serial port log.
-	 */
-	return 0;
+    return 0;
+    
 }
